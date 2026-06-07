@@ -1,0 +1,574 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>HealthMonitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Syne:wght@400;700;800&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --bg2: #111318;
+    --bg3: #181c23;
+    --border: rgba(255,255,255,0.07);
+    --hr-color: #f03e5f;
+    --spo2-color: #3ecff0;
+    --warn-color: #f0a03e;
+    --danger-color: #f03e3e;
+    --ok-color: #3ef08a;
+    --text: #e8eaf0;
+    --muted: #5a5f70;
+    --card-radius: 16px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Syne', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Noise overlay */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='1'/%3E%3C/svg%3E");
+    opacity: 0.025;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  header {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 24px 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .logo {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .logo-icon {
+    width: 36px; height: 36px;
+    background: var(--hr-color);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    animation: pulse-logo 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-logo {
+    0%,100% { box-shadow: 0 0 0 0 rgba(240,62,95,0.5); transform: scale(1); }
+    50% { box-shadow: 0 0 0 8px rgba(240,62,95,0); transform: scale(1.05); }
+  }
+
+  .logo-icon svg { width: 18px; height: 18px; fill: white; }
+
+  .logo-text {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+  }
+
+  .logo-text span { color: var(--hr-color); }
+
+  .status-pill {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 14px;
+    border-radius: 999px;
+    border: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    color: var(--muted);
+    background: var(--bg2);
+  }
+
+  .status-dot {
+    width: 7px; height: 7px;
+    border-radius: 50%;
+    background: var(--ok-color);
+    box-shadow: 0 0 6px var(--ok-color);
+    animation: blink 2s ease-in-out infinite;
+  }
+
+  .status-dot.off { background: var(--muted); box-shadow: none; animation: none; }
+
+  @keyframes blink {
+    0%,100% { opacity: 1; } 50% { opacity: 0.4; }
+  }
+
+  main {
+    position: relative;
+    z-index: 1;
+    padding: 28px 32px;
+    max-width: 1400px;
+    margin: 0 auto;
+  }
+
+  /* ── Cards de métricas ── */
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .metric-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 20px 22px;
+    position: relative;
+    overflow: hidden;
+    transition: border-color 0.3s;
+  }
+
+  .metric-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 2px;
+    background: var(--accent, var(--hr-color));
+    opacity: 0.8;
+  }
+
+  .metric-card.spo2 { --accent: var(--spo2-color); }
+  .metric-card.warn { --accent: var(--warn-color); }
+  .metric-card.ok   { --accent: var(--ok-color); }
+
+  .metric-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+
+  .metric-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1;
+    color: var(--accent, var(--hr-color));
+    transition: color 0.4s;
+  }
+
+  .metric-value.alert { animation: flash-val 0.4s ease; }
+  @keyframes flash-val { 0%,100% { opacity:1; } 50% { opacity:0.3; } }
+
+  .metric-unit {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 4px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .metric-sub {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 8px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  /* ── Gráficos ── */
+  .charts {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .chart-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 22px;
+  }
+
+  .chart-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 16px;
+  }
+
+  .chart-wrap {
+    position: relative;
+    height: 180px;
+  }
+
+  /* ── Alertas de queda ── */
+  .alerts-card {
+    background: var(--bg2);
+    border: 1px solid var(--border);
+    border-radius: var(--card-radius);
+    padding: 22px;
+    margin-bottom: 24px;
+  }
+
+  .alerts-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 16px;
+  }
+
+  .alerts-title {
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .alerts-count {
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    background: rgba(240,62,62,0.15);
+    color: var(--danger-color);
+    border: 1px solid rgba(240,62,62,0.25);
+  }
+
+  .alerts-empty {
+    text-align: center;
+    padding: 28px;
+    color: var(--muted);
+    font-size: 13px;
+    font-family: 'Space Mono', monospace;
+  }
+
+  .alert-item {
+    display: grid;
+    grid-template-columns: auto 1fr auto;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--bg3);
+    margin-bottom: 8px;
+    border: 1px solid var(--border);
+    animation: slide-in 0.3s ease;
+  }
+
+  @keyframes slide-in {
+    from { opacity: 0; transform: translateX(-10px); }
+    to   { opacity: 1; transform: translateX(0); }
+  }
+
+  .alert-badge {
+    width: 36px; height: 36px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+
+  .badge-queda { background: rgba(240,62,62,0.15); color: var(--danger-color); }
+  .badge-impacto { background: rgba(240,160,62,0.15); color: var(--warn-color); }
+
+  .alert-info { min-width: 0; }
+
+  .alert-type {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text);
+    margin-bottom: 2px;
+  }
+
+  .alert-detail {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .alert-time {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+    text-align: right;
+    flex-shrink: 0;
+  }
+
+  /* ── Footer ── */
+  footer {
+    position: relative;
+    z-index: 1;
+    text-align: center;
+    padding: 20px;
+    border-top: 1px solid var(--border);
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  /* ── Glow nos cards ao receber dado ── */
+  .metric-card.received {
+    border-color: rgba(62,207,240,0.3);
+    transition: border-color 0.1s;
+  }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .metrics { grid-template-columns: repeat(2,1fr); }
+    .charts  { grid-template-columns: 1fr; }
+    main { padding: 20px 16px; }
+    header { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">
+      <svg viewBox="0 0 24 24"><path d="M12 21.593c-5.63-5.539-11-10.297-11-14.402 0-3.791 3.068-5.191 5.281-5.191 1.312 0 4.151.501 5.719 4.457 1.59-3.968 4.464-4.447 5.726-4.447 2.54 0 5.274 1.621 5.274 5.181 0 4.069-5.136 8.625-11 14.402z"/></svg>
+    </div>
+    <div class="logo-text">Health<span>Monitor</span></div>
+  </div>
+  <div class="status-pill">
+    <div class="status-dot" id="status-dot"></div>
+    <span id="status-text">aguardando dados...</span>
+  </div>
+</header>
+
+<main>
+  <!-- Métricas -->
+  <div class="metrics">
+    <div class="metric-card" id="card-hr">
+      <div class="metric-label">Freq. Cardíaca</div>
+      <div class="metric-value" id="val-hr">--</div>
+      <div class="metric-unit">bpm</div>
+      <div class="metric-sub" id="avg-hr">média 5 min: --</div>
+    </div>
+    <div class="metric-card spo2" id="card-spo2">
+      <div class="metric-label">Saturação O₂</div>
+      <div class="metric-value" id="val-spo2">--</div>
+      <div class="metric-unit">%</div>
+      <div class="metric-sub" id="avg-spo2">média 5 min: --</div>
+    </div>
+    <div class="metric-card warn" id="card-quedas">
+      <div class="metric-label">Quedas (1h)</div>
+      <div class="metric-value" id="val-quedas" style="color: var(--warn-color)">--</div>
+      <div class="metric-unit">eventos</div>
+      <div class="metric-sub" id="last-queda">último: --</div>
+    </div>
+    <div class="metric-card ok" id="card-ts">
+      <div class="metric-label">Última leitura</div>
+      <div class="metric-value" id="val-ts" style="font-size:22px; color: var(--ok-color)">--:--:--</div>
+      <div class="metric-unit"> </div>
+      <div class="metric-sub" id="val-date">--</div>
+    </div>
+  </div>
+
+  <!-- Gráficos -->
+  <div class="charts">
+    <div class="chart-card">
+      <div class="chart-title">Freq. Cardíaca — últimos 60s</div>
+      <div class="chart-wrap"><canvas id="chart-hr"></canvas></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Saturação O₂ — últimos 60s</div>
+      <div class="chart-wrap"><canvas id="chart-spo2"></canvas></div>
+    </div>
+  </div>
+
+  <!-- Alertas -->
+  <div class="alerts-card">
+    <div class="alerts-header">
+      <div class="alerts-title">Alertas de Queda / Impacto</div>
+      <div class="alerts-count" id="alerts-count">0 eventos</div>
+    </div>
+    <div id="alerts-list">
+      <div class="alerts-empty">Nenhum alerta registado.</div>
+    </div>
+  </div>
+</main>
+
+<footer>
+  HealthMonitor — ESP32 + MAX30100 + Raspberry Pi + Node.js · atualiza a cada 2s
+</footer>
+
+<script>
+const chartOptions = (color, min, max, unit) => ({
+  responsive: true,
+  maintainAspectRatio: false,
+  animation: { duration: 300 },
+  plugins: { legend: { display: false }, tooltip: {
+    backgroundColor: '#181c23',
+    borderColor: color,
+    borderWidth: 1,
+    titleColor: '#5a5f70',
+    bodyColor: '#e8eaf0',
+    bodyFont: { family: 'Space Mono', size: 12 },
+    callbacks: { label: ctx => ` ${ctx.parsed.y.toFixed(1)} ${unit}` }
+  }},
+  scales: {
+    x: {
+      ticks: { color: '#5a5f70', font: { family: 'Space Mono', size: 9 }, maxTicksLimit: 6 },
+      grid: { color: 'rgba(255,255,255,0.04)' }
+    },
+    y: {
+      min, max,
+      ticks: { color: '#5a5f70', font: { family: 'Space Mono', size: 9 } },
+      grid: { color: 'rgba(255,255,255,0.04)' }
+    }
+  }
+});
+
+const hrCtx   = document.getElementById('chart-hr').getContext('2d');
+const spo2Ctx = document.getElementById('chart-spo2').getContext('2d');
+
+const makeDataset = (color) => ({
+  data: [],
+  borderColor: color,
+  backgroundColor: color + '18',
+  fill: true,
+  tension: 0.4,
+  pointRadius: 2,
+  pointBackgroundColor: color,
+  borderWidth: 2,
+});
+
+const hrChart   = new Chart(hrCtx,   { type: 'line', data: { labels: [], datasets: [makeDataset('#f03e5f')] }, options: chartOptions('#f03e5f', 40, 160, 'bpm') });
+const spo2Chart = new Chart(spo2Ctx, { type: 'line', data: { labels: [], datasets: [makeDataset('#3ecff0')] }, options: chartOptions('#3ecff0', 85, 100, '%') });
+
+let lastTs = null;
+
+function fmtTime(ts) {
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  return d.toLocaleTimeString('pt-PT');
+}
+
+function fmtDate(ts) {
+  const d = new Date(ts.replace(' ', 'T') + 'Z');
+  return d.toLocaleDateString('pt-PT');
+}
+
+async function fetchVitals() {
+  try {
+    const r = await fetch('/api/vitals?limit=60');
+    const data = await r.json();
+    if (!data.length) return;
+
+    const labels = data.map(d => fmtTime(d.ts));
+    const hrs    = data.map(d => d.heartRate);
+    const spo2s  = data.map(d => d.spO2);
+
+    hrChart.data.labels   = labels;
+    hrChart.data.datasets[0].data = hrs;
+    spo2Chart.data.labels = labels;
+    spo2Chart.data.datasets[0].data = spo2s;
+    hrChart.update('none');
+    spo2Chart.update('none');
+
+    const last = data[data.length - 1];
+    if (last.ts !== lastTs) {
+      lastTs = last.ts;
+      document.getElementById('val-hr').textContent   = last.heartRate.toFixed(1);
+      document.getElementById('val-spo2').textContent = last.spO2.toFixed(1);
+      document.getElementById('val-ts').textContent   = fmtTime(last.ts);
+      document.getElementById('val-date').textContent = fmtDate(last.ts);
+      document.getElementById('status-dot').classList.remove('off');
+      document.getElementById('status-text').textContent = 'recebendo dados';
+
+      // Alerta BPM alto
+      const hr = last.heartRate;
+      const hrEl = document.getElementById('val-hr');
+      if (hr > 100) {
+        hrEl.style.color = 'var(--danger-color)';
+        hrEl.classList.add('alert');
+        setTimeout(() => hrEl.classList.remove('alert'), 400);
+      } else {
+        hrEl.style.color = 'var(--hr-color)';
+      }
+
+      // Alerta SpO2 baixo
+      const spo2El = document.getElementById('val-spo2');
+      if (last.spO2 < 94) {
+        spo2El.style.color = 'var(--danger-color)';
+      } else {
+        spo2El.style.color = 'var(--spo2-color)';
+      }
+    }
+  } catch(e) {
+    document.getElementById('status-dot').classList.add('off');
+    document.getElementById('status-text').textContent = 'sem conexão';
+  }
+}
+
+async function fetchStats() {
+  try {
+    const r = await fetch('/api/stats');
+    const s = await r.json();
+    if (s.avgHr)   document.getElementById('avg-hr').textContent   = `média 5 min: ${s.avgHr} bpm`;
+    if (s.avgSpo2) document.getElementById('avg-spo2').textContent = `média 5 min: ${s.avgSpo2}%`;
+    document.getElementById('val-quedas').textContent = s.quedas1h;
+  } catch(e) {}
+}
+
+async function fetchQuedas() {
+  try {
+    const r = await fetch('/api/quedas');
+    const data = await r.json();
+    const list = document.getElementById('alerts-list');
+    document.getElementById('alerts-count').textContent = data.length + ' eventos';
+
+    if (!data.length) {
+      list.innerHTML = '<div class="alerts-empty">Nenhum alerta registado.</div>';
+      return;
+    }
+
+    list.innerHTML = data.map(q => {
+      const isQueda = q.tipo === 'queda';
+      const emoji = isQueda ? '⚠️' : '💥';
+      const badgeClass = isQueda ? 'badge-queda' : 'badge-impacto';
+      const label = isQueda ? 'Queda detectada' : 'Impacto forte';
+      return `
+        <div class="alert-item">
+          <div class="alert-badge ${badgeClass}">${emoji}</div>
+          <div class="alert-info">
+            <div class="alert-type">${label}</div>
+            <div class="alert-detail">intensidade: ${q.intensidade} · contagem: ${q.contagem}</div>
+          </div>
+          <div class="alert-time">${fmtTime(q.ts)}<br>${fmtDate(q.ts)}</div>
+        </div>`;
+    }).join('');
+
+    if (data[0]) {
+      document.getElementById('last-queda').textContent = `último: ${fmtTime(data[0].ts)}`;
+    }
+  } catch(e) {}
+}
+
+// Iniciar polling
+fetchVitals();
+fetchStats();
+fetchQuedas();
+setInterval(fetchVitals, 2000);
+setInterval(fetchStats,  5000);
+setInterval(fetchQuedas, 5000);
+</script>
+</body>
+</html>
